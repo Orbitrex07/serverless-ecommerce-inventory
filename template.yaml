@@ -1,0 +1,245 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Serverless E-Commerce Inventory and Order Processing System.
+  Demonstrates event-driven serverless architecture using API Gateway HTTP API,
+  AWS Lambda (Python 3.12), Amazon DynamoDB with TransactWriteItems,
+  DynamoDB Streams, and Amazon SNS email notifications.
+
+Metadata:
+  AWS::ServerlessRepo::Application:
+    Name: serverless-ecommerce-inventory-order-processing
+    Description: Production-ready serverless inventory and order processing engine.
+
+Parameters:
+  NotificationEmail:
+    Type: String
+    Description: Project administrator email address for receiving order alerts via Amazon SNS.
+    AllowedPattern: ^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$
+    ConstraintDescription: Must be a valid email address (e.g. admin@example.com).
+
+  EnvironmentStage:
+    Type: String
+    Default: prod
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Deployment stage environment.
+
+Globals:
+  Function:
+    Timeout: 15
+    MemorySize: 256
+    Runtime: python3.12
+    Architectures:
+      - x86_64
+    Environment:
+      Variables:
+        STAGE: !Ref EnvironmentStage
+        POWERTOOLS_SERVICE_NAME: ServerlessEcommerce
+
+Resources:
+  # =========================================================================
+  # Amazon API Gateway (HTTP API)
+  # =========================================================================
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref EnvironmentStage
+      Description: High-performance HTTP API for Serverless E-Commerce
+      CorsConfiguration:
+        AllowMethods:
+          - GET
+          - POST
+          - OPTIONS
+        AllowHeaders:
+          - Content-Type
+          - Authorization
+        AllowOrigins:
+          - '*'
+        MaxAge: 600
+
+  # =========================================================================
+  # Amazon DynamoDB Tables
+  # =========================================================================
+  ProductsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${AWS::StackName}-Products
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: productId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: productId
+          KeyType: HASH
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Project
+          Value: ServerlessEcommerce
+        - Key: Environment
+          Value: !Ref EnvironmentStage
+
+  OrdersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${AWS::StackName}-Orders
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: orderId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: orderId
+          KeyType: HASH
+      StreamSpecification:
+        StreamViewType: NEW_IMAGE
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      Tags:
+        - Key: Project
+          Value: ServerlessEcommerce
+        - Key: Environment
+          Value: !Ref EnvironmentStage
+
+  # =========================================================================
+  # Amazon SNS Topic & Admin Email Subscription
+  # =========================================================================
+  OrderAlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub ${AWS::StackName}-OrderAlerts
+      DisplayName: Serverless E-Commerce Order Alerts
+      Tags:
+        - Key: Project
+          Value: ServerlessEcommerce
+
+  OrderAlertsEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref OrderAlertsTopic
+      Protocol: email
+      Endpoint: !Ref NotificationEmail
+
+  # =========================================================================
+  # AWS Lambda Functions
+  # =========================================================================
+  OrderApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: Handles /products and /orders endpoints with atomic inventory checks
+      CodeUri: src/order_api/
+      Handler: app.lambda_handler
+      Environment:
+        Variables:
+          PRODUCTS_TABLE: !Ref ProductsTable
+          ORDERS_TABLE: !Ref OrdersTable
+      Policies:
+        - Statement:
+            - Sid: DynamoDBProductsAccess
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Scan
+                - dynamodb:UpdateItem
+              Resource: !GetAtt ProductsTable.Arn
+            - Sid: DynamoDBOrdersAccess
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+              Resource: !GetAtt OrdersTable.Arn
+      Events:
+        GetProductsRoute:
+          Type: HttpApi
+          Properties:
+            Path: /products
+            Method: GET
+            ApiId: !Ref HttpApi
+        PostOrderRoute:
+          Type: HttpApi
+          Properties:
+            Path: /orders
+            Method: POST
+            ApiId: !Ref HttpApi
+        GetOrderRoute:
+          Type: HttpApi
+          Properties:
+            Path: /orders/{orderId}
+            Method: GET
+            ApiId: !Ref HttpApi
+
+  NotificationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: Asynchronously processes DynamoDB Streams for new orders and triggers SNS notifications
+      CodeUri: src/notifications/
+      Handler: app.lambda_handler
+      Environment:
+        Variables:
+          TOPIC_ARN: !Ref OrderAlertsTopic
+      Policies:
+        - Statement:
+            - Sid: SNSPublishAccess
+              Effect: Allow
+              Action:
+                - sns:Publish
+              Resource: !Ref OrderAlertsTopic
+      Events:
+        OrdersStreamEvent:
+          Type: DynamoDB
+          Properties:
+            Stream: !GetAtt OrdersTable.StreamArn
+            StartingPosition: LATEST
+            BatchSize: 5
+            MaximumRetryAttempts: 2
+            BisectBatchOnFunctionError: true
+
+# =========================================================================
+# CloudFormation Outputs
+# =========================================================================
+Outputs:
+  ApiEndpoint:
+    Description: Base URL for Amazon API Gateway HTTP API
+    Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${EnvironmentStage}"
+    Export:
+      Name: !Sub "${AWS::StackName}-ApiEndpoint"
+
+  ProductsEndpoint:
+    Description: Product Catalogue endpoint URL
+    Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${EnvironmentStage}/products"
+
+  OrdersEndpoint:
+    Description: Order Placement endpoint URL
+    Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${EnvironmentStage}/orders"
+
+  ProductsTableName:
+    Description: DynamoDB Products Table Name
+    Value: !Ref ProductsTable
+    Export:
+      Name: !Sub "${AWS::StackName}-ProductsTable"
+
+  OrdersTableName:
+    Description: DynamoDB Orders Table Name
+    Value: !Ref OrdersTable
+    Export:
+      Name: !Sub "${AWS::StackName}-OrdersTable"
+
+  OrdersStreamArn:
+    Description: DynamoDB Stream ARN for Orders Table
+    Value: !GetAtt OrdersTable.StreamArn
+
+  NotificationTopicArn:
+    Description: SNS Topic ARN for order notification broadcasts
+    Value: !Ref OrderAlertsTopic
+    Export:
+      Name: !Sub "${AWS::StackName}-NotificationTopic"
+
+  NotificationConfiguredEmail:
+    Description: Administrator email designated for order alert subscriptions
+    Value: !Ref NotificationEmail
+
+  SeedInventoryCommand:
+    Description: Shell command to seed the initial product catalogue
+    Value: !Sub "python scripts/seed_inventory.py --table-name ${ProductsTable} --region ${AWS::Region}"

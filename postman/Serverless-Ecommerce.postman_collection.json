@@ -1,0 +1,294 @@
+{
+  "info": {
+    "_postman_id": "e81c010d-bca5-4014-9b2f-7634f5df1a2e",
+    "name": "Serverless E-Commerce Inventory & Order Processing",
+    "description": "Comprehensive test collection for Serverless E-Commerce Inventory and Order Processing System built on AWS API Gateway HTTP API, Lambda, and DynamoDB.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://your-api-id.execute-api.ap-south-1.amazonaws.com/prod",
+      "type": "string",
+      "description": "API Gateway Base URL from CloudFormation / SAM deployment output."
+    },
+    {
+      "key": "orderId",
+      "value": "ord-example123",
+      "type": "string",
+      "description": "Order ID returned from a successful POST /orders request."
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Products - Get Catalogue",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "pm.test(\"Products array is returned with stock information\", function () {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property('products');",
+              "    pm.expect(jsonData.products).to.be.an('array');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/products",
+          "host": ["{{baseUrl}}"],
+          "path": ["products"]
+        },
+        "description": "Retrieves the product catalogue including product IDs, descriptions, real-time stock quantities, and prices."
+      },
+      "response": []
+    },
+    {
+      "name": "2. Orders - Create Order (Success 201)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 201 Created\", function () {",
+              "    pm.response.to.have.status(201);",
+              "});",
+              "pm.test(\"Order contains orderId, confirmed status, and total amount\", function () {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.have.property('orderId');",
+              "    pm.expect(jsonData.status).to.eql('CONFIRMED');",
+              "    pm.expect(jsonData).to.have.property('totalAmount');",
+              "    pm.collectionVariables.set('orderId', jsonData.orderId);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"customerName\": \"Aarav Sharma\",\n  \"customerEmail\": \"aarav.sharma@example.com\",\n  \"productId\": \"prod-101\",\n  \"quantity\": 2\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/orders",
+          "host": ["{{baseUrl}}"],
+          "path": ["orders"]
+        },
+        "description": "Places an order atomically. The server calculates the total price, reduces stock in Products table, and saves the order record in Orders table."
+      },
+      "response": []
+    },
+    {
+      "name": "3. Orders - Insufficient Stock (Conflict 409)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 409 Conflict\", function () {",
+              "    pm.response.to.have.status(409);",
+              "});",
+              "pm.test(\"Returns error message indicating insufficient stock\", function () {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData.error).to.eql('Conflict');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"customerName\": \"Test User\",\n  \"customerEmail\": \"test.user@example.com\",\n  \"productId\": \"prod-101\",\n  \"quantity\": 99999\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/orders",
+          "host": ["{{baseUrl}}"],
+          "path": ["orders"]
+        },
+        "description": "Tests inventory protection when ordering more units than currently available."
+      },
+      "response": []
+    },
+    {
+      "name": "4. Orders - Invalid Email Format (Bad Request 400)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 400 Bad Request\", function () {",
+              "    pm.response.to.have.status(400);",
+              "});",
+              "pm.test(\"Error specifies email validation failure\", function () {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData.error).to.eql('BadRequest');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"customerName\": \"Invalid Email User\",\n  \"customerEmail\": \"not-a-valid-email\",\n  \"productId\": \"prod-101\",\n  \"quantity\": 1\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/orders",
+          "host": ["{{baseUrl}}"],
+          "path": ["orders"]
+        },
+        "description": "Validates that the server rejects invalid customer email addresses with 400 Bad Request."
+      },
+      "response": []
+    },
+    {
+      "name": "5. Orders - Product Not Found (404)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 404 Not Found\", function () {",
+              "    pm.response.to.have.status(404);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"customerName\": \"Test Buyer\",\n  \"customerEmail\": \"buyer@example.com\",\n  \"productId\": \"prod-nonexistent-999\",\n  \"quantity\": 1\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/orders",
+          "host": ["{{baseUrl}}"],
+          "path": ["orders"]
+        },
+        "description": "Verifies that ordering a non-existent product returns HTTP 404."
+      },
+      "response": []
+    },
+    {
+      "name": "6. Orders - Get Order Details (200 OK)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 200 OK\", function () {",
+              "    pm.response.to.have.status(200);",
+              "});",
+              "pm.test(\"Response excludes customer email for privacy\", function () {",
+              "    var jsonData = pm.response.json();",
+              "    pm.expect(jsonData).to.not.have.property('customerEmail');",
+              "    pm.expect(jsonData).to.have.property('orderId');",
+              "    pm.expect(jsonData).to.have.property('status');",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/orders/{{orderId}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["orders", "{{orderId}}"]
+        },
+        "description": "Retrieves the non-sensitive order summary. Confirms that sensitive personal information (such as customer email) is NOT returned."
+      },
+      "response": []
+    },
+    {
+      "name": "7. Orders - Get Non-Existent Order (404 Not Found)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test(\"Status code is 404 Not Found\", function () {",
+              "    pm.response.to.have.status(404);",
+              "});"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/orders/ord-does-not-exist-999",
+          "host": ["{{baseUrl}}"],
+          "path": ["orders", "ord-does-not-exist-999"]
+        },
+        "description": "Verifies that querying an unknown orderId returns 404 Not Found."
+      },
+      "response": []
+    }
+  ]
+}
