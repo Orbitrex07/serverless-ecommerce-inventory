@@ -143,12 +143,14 @@ Resources:
                 - dynamodb:GetItem
                 - dynamodb:Scan
                 - dynamodb:UpdateItem
+                - dynamodb:TransactWriteItems
               Resource: !GetAtt ProductsTable.Arn
             - Sid: DynamoDBOrdersAccess
               Effect: Allow
               Action:
                 - dynamodb:GetItem
                 - dynamodb:PutItem
+                - dynamodb:TransactWriteItems
               Resource: !GetAtt OrdersTable.Arn
       Events:
         GetProductsRoute:
